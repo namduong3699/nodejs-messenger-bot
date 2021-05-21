@@ -10,6 +10,7 @@ var request = require('request');
 const { resolve } = require('path');
 var router = express();
 var app = express();
+require('dotenv').config()
 
 app.use(logger('dev'));
 app.use(bodyParser.json());
@@ -35,25 +36,35 @@ app.get('/test', async (req, res) => {
 });
 
 app.get('/webhook', function(req, res) {
-    if (req.query['hub.verify_token'] === process.env.FB_WEBHOOK_TOKEN) {
-        res.send(req.query['hub.challenge']);
+    // Parse the query params
+    let mode = req.query['hub.mode'];
+    let token = req.query['hub.verify_token'];
+    let challenge = req.query['hub.challenge'];
+
+    if (mode && token) {
+        if (mode === 'subscribe' && token === process.env.FB_WEBHOOK_TOKEN) {
+        
+            // Responds with the challenge token from the request
+            res.status(200).send(challenge);
+        
+        } else {
+            res.sendStatus(403);
+        }
     }
-    res.send('Error, wrong validation token');
 });
 
 // Đoạn code xử lý khi có người nhắn tin cho bot
-app.post('/webhook', async function(req, res) {
-    var entries = req.body.entry;
-    for (var entry of entries) {
-        var messaging = entry.messaging;
-        for (var message of messaging) {
-            var senderId = message.sender.id;
-            if (message.message) { // Nếu người dùng gửi tin nhắn đến
-                if (message.message.text) {
+app.post('/webhook', function(req, res) {
+    if (req.body.object === 'page') {
+        req.body.entry.forEach(async function(entry) {
+            var messaging = entry.messaging;
+            for (var message of messaging) {
+                var senderId = message.sender.id;
+                if (message.message && message.message.text) { // Nếu người dùng gửi tin nhắn đến
                     var text = message.message.text.trim();
 
                     if(text.startsWith('Thông tin ')) {
-                        const city = text.replace('Thông tin ', '');
+                        const city = removeAccents(text.replace('Thông tin ', ''));
                         sendMessage(senderId, await getCovidInfo(city));
                     } else if(text == 'hi' || text == "hello") {
                         sendMessage(senderId, 'Xin Chào');
@@ -62,9 +73,12 @@ app.post('/webhook', async function(req, res) {
                     }
                 }
             }
-        }
+        });
+
+        res.status(200).send('EVENT_RECEIVED');
+    } else {
+        res.sendStatus(404);
     }
-    res.status(200).send("OK");
 });
 
 // Gửi thông tin tới REST API để Bot tự trả lời
